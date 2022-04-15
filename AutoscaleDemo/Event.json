@@ -1,0 +1,13 @@
+{
+  "id": "e77ddf9b-eb01-40c9-b034-ee3ab36567e6",
+  "StoreId": "1",
+  "SyntheticKey": "1;e77ddf9b-eb01-40c9-b034-ee3ab36567e6",
+  "Amount": 42,
+  "TransactionType": "payment",
+  "Currency": "USD",
+  "Username": "Alice",
+  "Country": "Wonderland",
+  "Address": "123 Contoso Way",
+  "Date": "2022-04-14",
+  "Timestamp": "2022-04-14T00:06:17.1531888+00:00"
+}
