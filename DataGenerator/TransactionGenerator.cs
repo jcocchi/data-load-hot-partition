@@ -11,9 +11,9 @@ namespace DataGenerator
         private const int ITEMSET_RANDOM_SEED = 42;
         private const int NUM_STORES = 500;
 
-        private readonly string[] _storeIds;
+        private readonly int[] _storeIds = new int[500];
         // Probability each store will show up in the data generated
-        private readonly float[] _weights;
+        private readonly float[] _weights = new float[500];
 
         public TransactionGenerator()
         {
@@ -22,27 +22,56 @@ namespace DataGenerator
                 Random = new Randomizer(ITEMSET_RANDOM_SEED)
             };
 
-            _storeIds = Enumerable.Range(1, NUM_STORES)
-                .Select(_ => faker.Random.AlphaNumeric(6))
-                .ToArray();
-            _weights = Enumerable.Range(1, NUM_STORES)
-                .Select((int i) => {
-                    // Artifically increase the weight of the first 50 stores to create hot partitions
-                    if (i < 50)
-                    {
-                        return 0.04F;
-                    }
-                    // Artifically increase the weight of the next 50 stores by a smaller amount to create warm partitions
-                    else if (i < 100)
-                    {
-                        return 0.03F;
-                    }
-                    else
-                    {
-                        return 0.0126F;
-                    }
-                })
-                .ToArray();
+            for(int i = 0; i < NUM_STORES; i++)
+            {
+                _storeIds[i] = i + 1;
+                //// Artifically increase the weight of the first 50 stores to create hot partitions
+                //if (i == 1)
+                //{
+                //    _weights[i] = 0.25F;
+                //}
+                //// Artifically increase the weight of the next 50 stores by a smaller amount to create warm partitions
+                //else if (i < 100)
+                //{
+                //    _weights[i] = 0.00015F;
+                //}
+                // Artifically increase the weight of the first 50 stores to create hot partitions
+                if (i < 50)
+                {
+                    _weights[i] = 0.04F;
+                }
+                // Artifically increase the weight of the next 50 stores by a smaller amount to create warm partitions
+                else if (i < 100)
+                {
+                    _weights[i] = 0.03F;
+                }
+                else
+                {
+                    _weights[i] = 0.0126F;
+                }
+            }
+
+            //_storeIds = Enumerable.Range(1, NUM_STORES)
+            //    .Select((int i) => i)
+            //    .ToArray();
+            //_weights = Enumerable.Range(1, NUM_STORES)
+            //    .Select((int i) => {
+            //        // Artifically increase the weight of the first 50 stores to create hot partitions
+            //        if (i < 50)
+            //        {
+            //            return 0.04F;
+            //        }
+            //        // Artifically increase the weight of the next 50 stores by a smaller amount to create warm partitions
+            //        else if (i < 100)
+            //        {
+            //            return 0.03F;
+            //        }
+            //        else
+            //        {
+            //            return 0.0126F;
+            //        }
+            //    })
+            //    .ToArray();
         }
 
         internal List<Transaction> GenerateRandomTransactions(int numberOfDocumentsPerBatch)
@@ -52,7 +81,7 @@ namespace DataGenerator
                 //Generate event
                 .RuleFor(t => t.id, f => Guid.NewGuid().ToString())
                 .RuleFor(t => t.TransactionId, (f, m) => $"{m.id}") // same as id
-                .RuleFor(t => t.StoreId, f => f.Random.WeightedRandom<string>(this._storeIds, this._weights))
+                .RuleFor(t => t.StoreId, 1) //f => f.Random.WeightedRandom<int>(this._storeIds, this._weights))
                 .RuleFor(t => t.StoreIdTransactionIdKey, (f, m) => $"{m.StoreId};{m.id}")
                 .RuleFor(p => p.NumItems, f => f.Random.Int(1, 50))
                 .RuleFor(t => t.Amount, f => f.Finance.Amount())

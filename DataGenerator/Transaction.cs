@@ -8,7 +8,7 @@ namespace DataGenerator
 
         public string TransactionId { get; set; }
 
-        public string StoreId { get; set; }
+        public int StoreId { get; set; }
 
         public string StoreIdTransactionIdKey { get; set; }
 

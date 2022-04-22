@@ -26,7 +26,8 @@ namespace DataGenerator
         private Container container;
 
         private const int MinThreadPoolSize = 100;
-        private const int NumRegions = 1; //Divide by # regions of your Azure Cosmos DB account for accurate RU/s calculation
+        private const int NumRegions = 1; // Divide by # regions of your Azure Cosmos DB account for accurate RU/s calculation
+        private const int DelayBetweenWritesMS = 100; // If `DelayBetweenWrites` setting true, MS to wait on client side between each insert
 
         private int pendingTaskCount;
         private long documentsInserted;
@@ -35,11 +36,12 @@ namespace DataGenerator
         private static CosmosClientOptions cosmosClientOptions = new CosmosClientOptions
         {
             ApplicationName = "ContosoDemoDataGenerator",
-            //ApplicationRegion = Regions.WestUS2, // Set the write region of your Azure Cosmos DB account. This should be in the same region as your VM.
+            ApplicationRegion = Regions.EastUS2, // Set the write region of your Azure Cosmos DB account. This should be in the same region as your VM.
             ConnectionMode = ConnectionMode.Direct, // Use default of direct mode for best performance
+            AllowBulkExecution = true,
             RequestTimeout = new TimeSpan(1, 0, 0),
             MaxTcpConnectionsPerEndpoint = 1000,
-            MaxRetryAttemptsOnRateLimitedRequests = 10, // Retry policy - retry up to 10 times if requests are rate-limited (429)
+            MaxRetryAttemptsOnRateLimitedRequests = 10, // Retry policy - retry up to 5 times if requests are rate-limited (429)
             MaxRetryWaitTimeOnRateLimitedRequests = new TimeSpan(0, 1, 0) // Retry policy - maximum time the client should spend on retrying on 429s
         };
 
@@ -137,11 +139,20 @@ namespace DataGenerator
             tasks.Add(this.LogOutputStats());
 
             int numberOfItemsToInsertPerTask = int.Parse(ConfigurationManager.AppSettings["NumberOfDocumentsToInsert"]) / taskCount; //determine number of documents to insert per task
-            var dataGenerator = new TransactionGenerator();
 
-            for (var i = 0; i < taskCount; i++)
+            if (bool.Parse(ConfigurationManager.AppSettings["WriteStaticData"]))
             {
-                tasks.Add(this.InsertCustomDocuments(dataGenerator, i, numberOfItemsToInsertPerTask));
+                for (var i = 0; i < taskCount; i++)
+                {
+                    tasks.Add(this.InsertStaticDocuments(i, numberOfItemsToInsertPerTask));
+                }
+            }
+            else {
+                var dataGenerator = new TransactionGenerator();
+                for (var i = 0; i < taskCount; i++)
+                {
+                    tasks.Add(this.InsertCustomDocuments(dataGenerator, i, numberOfItemsToInsertPerTask));
+                }
             }
 
             await Task.WhenAll(tasks);
@@ -162,6 +173,10 @@ namespace DataGenerator
 
             for (var i = 0; i < itemsToInsert.Count; i++)
             {
+                if (bool.Parse(ConfigurationManager.AppSettings["DelayBetweenWrites"]))
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(DelayBetweenWritesMS));  
+                }
                 try
                 {
                     var newItem = itemsToInsert[i];
@@ -183,6 +198,66 @@ namespace DataGenerator
                     {
                         // TODO
                     }
+                }
+            }
+
+            Interlocked.Decrement(ref this.pendingTaskCount); // Consider task as completed when all documents have been inserted
+        }
+
+        private async Task InsertStaticDocuments(int taskId, int numberOfItemsToInsert)
+        {
+            requestUnitsConsumed[taskId] = 0;
+
+            for (var i = 0; i < numberOfItemsToInsert; i++)
+            {
+                if (bool.Parse(ConfigurationManager.AppSettings["DelayBetweenWrites"]))
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(DelayBetweenWritesMS)); // Wait some time on client side between each insert. 
+                }
+
+                ItemResponse<Transaction> itemResponse = null;
+                try
+                {
+                    var id = Guid.NewGuid().ToString();
+                    var timestamp = DateTime.Now;
+                    var newItem = new Transaction()
+                    {
+                        id = id,
+                        TransactionId = id,
+                        StoreId = 1,
+                        StoreIdTransactionIdKey = $"1;{id}",
+                        NumItems = 5,
+                        Currency = "USD",
+                        UserId = "cosmosuser",
+                        Country = "USA",
+                        Address = "1234 Microsoft Way",
+                        Date = timestamp.ToString("yyyy-MM-dd"),
+                        Timestamp = timestamp
+                    };
+
+                    itemResponse = await container.CreateItemAsync(newItem);
+
+                    requestUnitsConsumed[taskId] += itemResponse.RequestCharge / NumRegions; // Keep track of how many RU/s have been consumed for this task
+
+                    Interlocked.Increment(ref this.documentsInserted); // Increment # doc inserted
+                }
+                catch (CosmosException e)
+                {
+                    if (e.StatusCode == HttpStatusCode.TooManyRequests)
+                    {
+                        requestUnitsConsumed[taskId] += e.RequestCharge / NumRegions;
+                        Interlocked.Increment(ref this.throttlesCount);
+                        //Interlocked.Increment(ref this.documentsInserted);
+                    }
+                    else
+                    {
+                        //catchall
+                    }
+
+                }
+                catch (Exception ex)
+                {
+                    int x = 0;
                 }
             }
 
