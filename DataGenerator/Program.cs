@@ -14,10 +14,11 @@ namespace DataGenerator
     {
         private static readonly string Endpoint = ConfigurationManager.AppSettings["Endpoint"];
         private static readonly string PrimaryKey = ConfigurationManager.AppSettings["PrimaryKey"];
+        private static readonly int AutoscaleMaxThroughput = int.Parse(ConfigurationManager.AppSettings["AutoscaleMaxThroughput"]);
         private static readonly string DatabaseName = ConfigurationManager.AppSettings["DatabaseName"];
+
         private static readonly string ContainerName = ConfigurationManager.AppSettings["ContainerName"];
         private static readonly string PartitionKey = ConfigurationManager.AppSettings["PartitionKey"];
-        private static readonly int AutoscaleMaxThroughput = int.Parse(ConfigurationManager.AppSettings["AutoscaleMaxThroughput"]);
 
         private ConcurrentDictionary<int, double> requestUnitsConsumed = new ConcurrentDictionary<int, double>();
         private CosmosClient cosmosClient;
@@ -60,7 +61,10 @@ namespace DataGenerator
             Console.WriteLine("--------------------------------------------------------------------- ");
             Console.WriteLine();
 
-            Console.WriteLine("Starting...\n");
+            Console.WriteLine("What kind of workload would you like to generate? \n\t 1. Evenly distributed \n\t 2. Skewed");
+            var workload = GetOneTwoFromUser();
+
+            Console.WriteLine("\nStarting...\n");
 
             try
             {
@@ -68,7 +72,7 @@ namespace DataGenerator
                 using (var client = new CosmosClient(Endpoint, PrimaryKey, cosmosClientOptions))
                 {
                     var program = new Program(client);
-                    await program.RunAsync();
+                    await program.RunAsync(workload);
 
                     Console.WriteLine("Data generation completed successfully.");
                 }
@@ -86,37 +90,37 @@ namespace DataGenerator
             }
         }
 
-        private async Task RunAsync()
+        private async Task RunAsync(int workload)
         {
             await Setup();
-            await IngestData();
+            await IngestData(workload);
         }
 
         private async Task Setup()
         {
-            database = (await cosmosClient.CreateDatabaseIfNotExistsAsync(DatabaseName)).Database;
+            database = cosmosClient.GetDatabase(DatabaseName); //(await cosmosClient.CreateDatabaseIfNotExistsAsync(DatabaseName)).Database;
             var autoscaleThroughput = ThroughputProperties.CreateAutoscaleThroughput(AutoscaleMaxThroughput);
             
-            if (bool.Parse(ConfigurationManager.AppSettings["IsHierarchy"]))
-            {
-                // Expecting format /<Prop1>/<Prop2>
-                var paths = PartitionKey.Split('/');
-                // This will split into { "", "<Prop1>", "<Prop2>" } so we just want the values in index 1 and 2
-                List<string> hierarchyKeyPaths = new List<string> { $"/{paths[1]}", $"/{paths[2]}" };
+            //if (bool.Parse(ConfigurationManager.AppSettings["IsHierarchy"]))
+            //{
+            //    // Expecting format /<Prop1>/<Prop2>
+            //    var paths = PartitionKey.Split('/');
+            //    // This will split into { "", "<Prop1>", "<Prop2>" } so we just want the values in index 1 and 2
+            //    List<string> hierarchyKeyPaths = new List<string> { $"/{paths[1]}", $"/{paths[2]}" };
 
-                ContainerProperties containerProperties = new ContainerProperties(ContainerName, partitionKeyPaths: hierarchyKeyPaths);
-                await database.CreateContainerIfNotExistsAsync(containerProperties, autoscaleThroughput);
-            }
-            else
-            {
-                ContainerProperties containerProperties = new ContainerProperties(ContainerName, partitionKeyPath: PartitionKey);
-                await database.CreateContainerIfNotExistsAsync(containerProperties, autoscaleThroughput);
-            }
+            //    ContainerProperties containerProperties = new ContainerProperties(ContainerName, partitionKeyPaths: hierarchyKeyPaths);
+            //    //await database.CreateContainerIfNotExistsAsync(containerProperties, autoscaleThroughput);
+            //}
+            //else
+            //{
+            //    ContainerProperties containerProperties = new ContainerProperties(ContainerName, partitionKeyPath: PartitionKey);
+            //    //await database.CreateContainerIfNotExistsAsync(containerProperties, autoscaleThroughput);
+            //}
 
             container = database.GetContainer(ContainerName);
         }
 
-        private async Task IngestData()
+        private async Task IngestData(int workload)
         {
             int taskCount;
             int degreeOfParallelism = int.Parse(ConfigurationManager.AppSettings["DegreeOfParallelism"]);
@@ -140,7 +144,7 @@ namespace DataGenerator
 
             int numberOfItemsToInsertPerTask = int.Parse(ConfigurationManager.AppSettings["NumberOfDocumentsToInsert"]) / taskCount; //determine number of documents to insert per task
 
-            if (bool.Parse(ConfigurationManager.AppSettings["WriteStaticData"]))
+            if (workload == 2)
             {
                 for (var i = 0; i < taskCount; i++)
                 {
@@ -322,6 +326,17 @@ namespace DataGenerator
                 Math.Round(ruPerSecond)
                );
             Console.WriteLine("--------------------------------------------------------------------- ");
+        }
+
+        private static int GetOneTwoFromUser()
+        {
+            int n;
+            while (!int.TryParse(Console.ReadLine(), out n) || !(n == 1 || n == 2))
+            {
+                Console.WriteLine("Please enter either 1 or 2.");
+            };
+
+            return n;
         }
     }
 }
