@@ -28,7 +28,7 @@ namespace DataGenerator
 
         private const int MinThreadPoolSize = 100;
         private const int NumRegions = 1; // Divide by # regions of your Azure Cosmos DB account for accurate RU/s calculation
-        private const int DelayBetweenWritesMS = 100; // If `DelayBetweenWrites` setting true, MS to wait on client side between each insert
+        private const int DelayBetweenWritesMS = 275; // If `DelayBetweenWrites` setting true, MS to wait on client side between each insert
 
         private int pendingTaskCount;
         private long documentsInserted;
@@ -78,9 +78,7 @@ namespace DataGenerator
                 }
             }
             catch (Exception e)
-            {
-                // If the Exception is a DocumentClientException, the "StatusCode" value might help identity 
-                // the source of the problem. 
+            { 
                 Console.WriteLine("Samples failed with exception:{0}", e);
             }
             finally
