@@ -14,11 +14,16 @@ namespace DataGenerator
     {
         private static readonly string Endpoint = ConfigurationManager.AppSettings["Endpoint"];
         private static readonly string PrimaryKey = ConfigurationManager.AppSettings["PrimaryKey"];
-        private static readonly int AutoscaleMaxThroughput = int.Parse(ConfigurationManager.AppSettings["AutoscaleMaxThroughput"]);
-        private static readonly string DatabaseName = ConfigurationManager.AppSettings["DatabaseName"];
 
+        private static readonly string DatabaseName = ConfigurationManager.AppSettings["DatabaseName"];
         private static readonly string ContainerName = ConfigurationManager.AppSettings["ContainerName"];
         private static readonly string PartitionKey = ConfigurationManager.AppSettings["PartitionKey"];
+
+        private static readonly int AutoscaleMaxThroughput = int.Parse(ConfigurationManager.AppSettings["AutoscaleMaxThroughput"]);
+        private static readonly int NumberOfDocumentsToInsert = int.Parse(ConfigurationManager.AppSettings["NumberOfDocumentsToInsert"]);
+
+        private static readonly bool DelayBetweenWrites = bool.Parse(ConfigurationManager.AppSettings["DelayBetweenWrites"]);
+        private static readonly int DelayBetweenWritesMS = int.Parse(ConfigurationManager.AppSettings["DelayBetweenWritesMS"]);
 
         private ConcurrentDictionary<int, double> requestUnitsConsumed = new ConcurrentDictionary<int, double>();
         private CosmosClient cosmosClient;
@@ -28,7 +33,6 @@ namespace DataGenerator
 
         private const int MinThreadPoolSize = 100;
         private const int NumRegions = 1; // Divide by # regions of your Azure Cosmos DB account for accurate RU/s calculation
-        private const int DelayBetweenWritesMS = 275; // If `DelayBetweenWrites` setting true, MS to wait on client side between each insert
 
         private int pendingTaskCount;
         private long documentsInserted;
@@ -42,11 +46,11 @@ namespace DataGenerator
             AllowBulkExecution = true,
             RequestTimeout = new TimeSpan(1, 0, 0),
             MaxTcpConnectionsPerEndpoint = 1000,
-            MaxRetryAttemptsOnRateLimitedRequests = 10, // Retry policy - retry up to 5 times if requests are rate-limited (429)
+            MaxRetryAttemptsOnRateLimitedRequests = 10, // Retry policy - retry up to 10 times if requests are rate-limited (429)
             MaxRetryWaitTimeOnRateLimitedRequests = new TimeSpan(0, 1, 0) // Retry policy - maximum time the client should spend on retrying on 429s
         };
 
-        private Program(CosmosClient client)//new program with the document cosmosClient
+        private Program(CosmosClient client)
         {
             this.cosmosClient = client;
         }
@@ -96,26 +100,27 @@ namespace DataGenerator
 
         private async Task Setup()
         {
-            database = cosmosClient.GetDatabase(DatabaseName); //(await cosmosClient.CreateDatabaseIfNotExistsAsync(DatabaseName)).Database;
+            database = await cosmosClient.CreateDatabaseIfNotExistsAsync(DatabaseName);
+
+            ContainerProperties containerProperties;
+            if (bool.Parse(ConfigurationManager.AppSettings["IsHierarchy"]))
+            {
+                List<string> hierarchyKeyPaths = new List<string>();
+                // Expecting format /<Prop1>/<Prop2>/<Prop3>
+                foreach (var path in PartitionKey.Trim('/').Split('/'))
+                {
+                    hierarchyKeyPaths.Add($"/{path}");
+                }
+
+                containerProperties = new ContainerProperties(ContainerName, partitionKeyPaths: hierarchyKeyPaths);
+            }
+            else
+            {
+                containerProperties = new ContainerProperties(ContainerName, partitionKeyPath: PartitionKey);
+            }
+
             var autoscaleThroughput = ThroughputProperties.CreateAutoscaleThroughput(AutoscaleMaxThroughput);
-            
-            //if (bool.Parse(ConfigurationManager.AppSettings["IsHierarchy"]))
-            //{
-            //    // Expecting format /<Prop1>/<Prop2>
-            //    var paths = PartitionKey.Split('/');
-            //    // This will split into { "", "<Prop1>", "<Prop2>" } so we just want the values in index 1 and 2
-            //    List<string> hierarchyKeyPaths = new List<string> { $"/{paths[1]}", $"/{paths[2]}" };
-
-            //    ContainerProperties containerProperties = new ContainerProperties(ContainerName, partitionKeyPaths: hierarchyKeyPaths);
-            //    //await database.CreateContainerIfNotExistsAsync(containerProperties, autoscaleThroughput);
-            //}
-            //else
-            //{
-            //    ContainerProperties containerProperties = new ContainerProperties(ContainerName, partitionKeyPath: PartitionKey);
-            //    //await database.CreateContainerIfNotExistsAsync(containerProperties, autoscaleThroughput);
-            //}
-
-            container = database.GetContainer(ContainerName);
+            container = await database.CreateContainerIfNotExistsAsync(containerProperties, autoscaleThroughput);
         }
 
         private async Task IngestData(int workload)
@@ -140,9 +145,9 @@ namespace DataGenerator
             // Prints out average RU/s consumed and writes/s every second. Runs until all inserts are completed. 
             tasks.Add(this.LogOutputStats());
 
-            int numberOfItemsToInsertPerTask = int.Parse(ConfigurationManager.AppSettings["NumberOfDocumentsToInsert"]) / taskCount; //determine number of documents to insert per task
+            int numberOfItemsToInsertPerTask = NumberOfDocumentsToInsert / taskCount; //determine number of documents to insert per task
 
-            if (workload == 2)
+            if (workload == 2) // Skewed workload writing to only one store
             {
                 for (var i = 0; i < taskCount; i++)
                 {
@@ -175,10 +180,11 @@ namespace DataGenerator
 
             for (var i = 0; i < itemsToInsert.Count; i++)
             {
-                if (bool.Parse(ConfigurationManager.AppSettings["DelayBetweenWrites"]))
+                if (DelayBetweenWrites)
                 {
                     await Task.Delay(TimeSpan.FromMilliseconds(DelayBetweenWritesMS));  
                 }
+
                 try
                 {
                     var newItem = itemsToInsert[i];
@@ -194,11 +200,10 @@ namespace DataGenerator
                     {
                         requestUnitsConsumed[taskId] += e.RequestCharge / NumRegions;
                         Interlocked.Increment(ref this.throttlesCount);
-                        //Interlocked.Increment(ref this.documentsInserted);
                     }
                     else
                     {
-                        // TODO
+                        // catchall
                     }
                 }
             }
@@ -212,9 +217,9 @@ namespace DataGenerator
 
             for (var i = 0; i < numberOfItemsToInsert; i++)
             {
-                if (bool.Parse(ConfigurationManager.AppSettings["DelayBetweenWrites"]))
+                if (DelayBetweenWrites)
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(DelayBetweenWritesMS)); // Wait some time on client side between each insert. 
+                    await Task.Delay(TimeSpan.FromMilliseconds(DelayBetweenWritesMS));
                 }
 
                 ItemResponse<Transaction> itemResponse = null;
@@ -226,7 +231,7 @@ namespace DataGenerator
                     {
                         id = id,
                         TransactionId = id,
-                        StoreId = 1,
+                        StoreId = 1,  // Assuming the partition key is StoreId, this will skew inserts to create a hot partition
                         StoreIdTransactionIdKey = $"1;{id}",
                         NumItems = 5,
                         Currency = "USD",
@@ -249,11 +254,10 @@ namespace DataGenerator
                     {
                         requestUnitsConsumed[taskId] += e.RequestCharge / NumRegions;
                         Interlocked.Increment(ref this.throttlesCount);
-                        //Interlocked.Increment(ref this.documentsInserted);
                     }
                     else
                     {
-                        //catchall
+                        // catchall
                     }
 
                 }

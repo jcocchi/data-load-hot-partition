@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<configuration>
+	<appSettings>
+		<add key="Endpoint" value =""/>
+		<add key="PrimaryKey" value="" />
+
+		<add key="DatabaseName" value="ContosoDemo" />
+		<add key="ContainerName" value="Transactions" />
+		<add key="PartitionKey" value="/StoreId/TransactionId" />
+		<add key="IsHierarchy" value="true" />
+
+		<add key="AutoscaleMaxThroughput" value="4000" />
+		<add key="DegreeOfParallelism" value="-1" />
+		<add key="NumberOfDocumentsToInsert" value="50000000" />
+
+        <add key="DelayBetweenWrites" value ="true" />
+        <add key="DelayBetweenWritesMS" value ="275" />
+
+        <add key="ShouldCleanupOnFinish" value ="false" />
+    </appSettings>
+</configuration>
